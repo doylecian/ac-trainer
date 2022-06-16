@@ -2,17 +2,30 @@ use eframe::egui;
 
 mod gstructs;
 mod memory;
+mod graph;
+use graph::*;
 
 fn main() {
-    let mut options = eframe::NativeOptions::default();
-    let window_size = Some(eframe::egui::Vec2{x: 700.0, y: 300.0}); 
-    options.initial_window_size = window_size;
-    eframe::run_native(
-        "Injector",
-        options,
-        Box::new(|_cc| Box::new(MyApp::default())),
-    );
-   
+
+    let node = Node::new('Z', 5, 10);
+    node.show_details();
+
+    let ptr = &node as *const Node;
+    println!("Pointer of node Z -> {:p}\n", ptr);
+
+    let node_a = Node::new('A', 0, 0);
+    let node_b = Node::new('B', 5, 5);
+    let edge = Edge::new(node_a, node_b, 10);
+    edge.show_details()
+
+    // let mut options = eframe::NativeOptions::default();
+    // let window_size = Some(eframe::egui::Vec2{x: 500.0, y: 300.0}); 
+    // options.initial_window_size = window_size;
+    // eframe::run_native(
+    //     "Injector",
+    //     options,
+    //     Box::new(|_cc| Box::new(MyApp::default())),
+    // );
 }
 
 struct MyApp {
@@ -20,7 +33,6 @@ struct MyApp {
     process_selected: String,
     injection_method: String
 }
-
 impl Default for MyApp {
     fn default() -> Self {
         Self {
@@ -36,6 +48,8 @@ impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("DLL Injector");
+            let size = ui.min_size();
+            ui.label(size.x.to_string());
             ui.label("Select a process to inject the DLL");
             ui.end_row();
             egui::ComboBox::from_label("")
