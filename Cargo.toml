@@ -9,3 +9,19 @@ edition = "2021"
 sysinfo = "0.24.2"
 egui = "0.18.1"
 eframe = "0.18.0"
+crossterm = "0.23.2"
+num = "0.4.0"
+
+[dependencies.windows]
+version = "0.38.0"
+features = [
+    "alloc",
+    "Data_Xml_Dom",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Memory"
+]
