@@ -38,6 +38,10 @@ struct Entity {
 	position: Coords
 }
 
+struct Client {
+	handle: HANDLE,
+
+}
 impl Entity {
 	fn new(addr: usize, name: String) -> Self{
 		Self { addr, name, position: Coords{ x: 0.0, z:  0.0, y: 0.0 } }
@@ -99,28 +103,22 @@ impl EntityList {
 fn main() {
 	println!("\nClient loaded successfuly! \n--------------------------\n");
 
-	let pid = get_process_pid(PROCESS_NAME);
-	if pid == None { panic!("ERROR: Couldn't find target process {}", PROCESS_NAME) }
+	let pid = get_process_pid(PROCESS_NAME).expect("Unable to locate process");
 	println!("[rust_client] Found target process {:?} ", pid);
-
-	let proc_addr = get_process_address(pid.unwrap());
-	if proc_addr == None { panic!("ERROR: Couldn't get modBaseAddr of process {}", PROCESS_NAME) }
+	let proc_addr = get_process_address(pid).expect("ERROR: Couldn't get modBaseAddr of process");
 	println!("[rust_client] Found target process base modBaseAddr {:?} ", proc_addr);
-
-	let proc_handle = get_process_handle(pid.unwrap());
-	if proc_handle == None { panic!("ERROR: Couldn't get handle to process {}", PROCESS_NAME) }
+	let proc_handle = get_process_handle(pid).expect("ERROR: Couldn't get handle to process");
 	println!("[rust_client] Created handle to process with PROCESS_VM_READ");
 
 	// Get memory addresses
 	let frametime = time::Duration::from_millis(10);
-
-	if let Some(ent_list_addr) = resolve_pointer_chain(proc_handle.unwrap(), proc_addr.unwrap(), &ENTITY_LIST_START, AddressType::Pointer) {
-		let mut ent_list = EntityList::new(ent_list_addr, 0x4, 5, proc_handle.unwrap());
+	if let Some(ent_list_addr) = resolve_pointer_chain(proc_handle, proc_addr, &ENTITY_LIST_START, AddressType::Pointer) {
+		let mut ent_list = EntityList::new(ent_list_addr, 0x4, 5, proc_handle);
 		ent_list.populate(5);
 		loop {
-			let local_player_xpos_addr = read_mem_addr(proc_handle.unwrap(), proc_addr.unwrap() + PLAYER_BASE, 4).unwrap();
-			let local_player_xpos = read_mem_addr(proc_handle.unwrap(), local_player_xpos_addr + ENTITY_COORDS_OFFSET[0], 4).unwrap();
-			let local_player_ypos = read_mem_addr(proc_handle.unwrap(), local_player_xpos_addr + ENTITY_COORDS_OFFSET[1], 4).unwrap();
+			let local_player_xpos_addr = read_mem_addr(proc_handle, proc_addr + PLAYER_BASE, 4).unwrap();
+			let local_player_xpos = read_mem_addr(proc_handle, local_player_xpos_addr + ENTITY_COORDS_OFFSET[0], 4).unwrap();
+			let local_player_ypos = read_mem_addr(proc_handle, local_player_xpos_addr + ENTITY_COORDS_OFFSET[1], 4).unwrap();
 			println!("LocalPlayer -> x: {:.4}, y: {:.4}", f32::from_bits(local_player_xpos as u32), f32::from_bits(local_player_ypos as u32));
 			for bot in &ent_list.ent_vec {
 				let dist = euclid_dist((f32::from_bits(local_player_xpos as u32), f32::from_bits(local_player_ypos as u32)), (bot.position.x, bot.position.y));

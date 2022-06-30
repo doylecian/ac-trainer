@@ -1,4 +1,4 @@
-use std::{mem::size_of, ffi::c_void, ptr};
+use std::{mem::size_of, ffi::c_void, ptr, fmt::Error};
 
 use sysinfo::{System, SystemExt, ProcessExt, Pid, PidExt};
 use windows::Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::ReadProcessMemory}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION}}, Foundation::{HANDLE, CloseHandle}};
@@ -34,17 +34,17 @@ pub fn get_process_handle(pid: u32) -> Option<HANDLE> {
     }
 }
 
-pub fn get_process_pid(name: &str) -> Option<u32> {
+pub fn get_process_pid(name: &str) -> Result<u32, String> {
     for (p_id, p_name) in get_process_list() {
         if p_name == name {
-            return Some(p_id.as_u32())
+            return Ok(p_id.as_u32())
         }
     }
-    None
+    return Err("Couldn't find target process".to_string());
 }
 
 
-pub fn get_process_address(pid: u32) -> Option<usize> {
+pub fn get_process_address(pid: u32) -> Result<usize, String> {
     let mut mod_entry = MODULEENTRY32::default();
     mod_entry.dwSize = size_of::<MODULEENTRY32>() as u32;
     unsafe {
@@ -52,11 +52,11 @@ pub fn get_process_address(pid: u32) -> Option<usize> {
             Ok(snapshot) => {
                 if Module32First(snapshot, &mut mod_entry).as_bool() {
                     CloseHandle(snapshot);
-                    return Some(mod_entry.modBaseAddr as usize);
+                    return Ok(mod_entry.modBaseAddr as usize);
                 }
-                else { return None }
+                else { return Err("Couldn't find target process".to_string()) }
             }
-            _ => None
+            _ => { return Err("Couldn't find target process".to_string()) }
         }
     }
 }
