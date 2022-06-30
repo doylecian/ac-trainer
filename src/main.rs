@@ -38,10 +38,6 @@ struct Entity {
 	position: Coords
 }
 
-struct Client {
-	handle: HANDLE,
-
-}
 impl Entity {
 	fn new(addr: usize, name: String) -> Self{
 		Self { addr, name, position: Coords{ x: 0.0, z:  0.0, y: 0.0 } }
@@ -97,9 +93,6 @@ impl EntityList {
 	}
 }
 
-
-// "ac_client.exe"+00109B74 ] + F8 ] -> Health
-
 fn main() {
 	println!("\nClient loaded successfuly! \n--------------------------\n");
 
@@ -110,7 +103,6 @@ fn main() {
 	let proc_handle = get_process_handle(pid).expect("ERROR: Couldn't get handle to process");
 	println!("[rust_client] Created handle to process with PROCESS_VM_READ");
 
-	// Get memory addresses
 	let frametime = time::Duration::from_millis(10);
 	if let Some(ent_list_addr) = resolve_pointer_chain(proc_handle, proc_addr, &ENTITY_LIST_START, AddressType::Pointer) {
 		let mut ent_list = EntityList::new(ent_list_addr, 0x4, 5, proc_handle);
@@ -137,27 +129,3 @@ fn main() {
 	}
 	unsafe { CloseHandle(proc_handle); }
 }
-		
-
-
-
-// if let Some(view_ang_addr) = resolve_pointer_chain(proc_handle.unwrap(), proc_addr.unwrap(), &PLAYER_VIEW_YAW_OFFSETS) {
-// 	if let Some(x_view_ang) = read_mem_addr(proc_handle.unwrap(), view_ang_addr) { 
-// 		println!("Found health value: {:?} at {:x}", x_view_ang, view_ang_addr); 
-// 		let mut cached_health = x_view_ang;
-// 		let ten_millis = time::Duration::from_millis(5);
-// 		loop {
-// 			if let Some(x_view) = read_mem_addr(proc_handle.unwrap(), view_ang_addr) {
-// 				if x_view != cached_health {
-// 					println!("[{:X}] localPlayer_yViewAngle -> {:?}", view_ang_addr as i32, f32::from_bits(x_view as u32));
-// 					cached_health = x_view;
-// 					print!("{}[2J", 27 as char);
-// 					//break;
-// 				}
-// 			}
-// 		thread::sleep(ten_millis);
-// 		}
-// 	}
-	
-// }
-

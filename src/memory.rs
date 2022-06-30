@@ -1,4 +1,4 @@
-use std::{mem::size_of, ffi::c_void, ptr, fmt::Error};
+use std::{mem::size_of, ffi::c_void, ptr};
 
 use sysinfo::{System, SystemExt, ProcessExt, Pid, PidExt};
 use windows::Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::ReadProcessMemory}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION}}, Foundation::{HANDLE, CloseHandle}};
