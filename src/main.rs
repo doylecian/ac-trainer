@@ -4,10 +4,11 @@ mod structs;
 mod math;
 
 use core::time;
-use std::thread;
+use std::{self, fmt::DebugStruct, thread};
 use memory::{get_process_pid, get_process_address};
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType}, math::euclid_dist};
+use std::collections::HashMap;
 
 const PROCESS_NAME: &str = "ac_client.exe";
 const PLAYER_BASE: usize = 0x00109B74;
@@ -18,6 +19,33 @@ const ENTITY_LIST_START: [usize; 1] = [0x10f4f8];
 const ENTITY_COORDS_OFFSET: [usize; 3] = [0x4, 0x8, 0xc];
 const ENTITY_NAME_OFFSET: usize = 0x224;
 
+struct Game {
+	proc_handle: HANDLE,
+	base_address: usize,
+	offsets: HashMap<String, Vec<usize>>,
+	entity_lists: HashMap<String, EntityList>
+}
+
+impl Game {
+	fn new(proc_handle: HANDLE, base_address: usize) -> Self {
+		Self { proc_handle, base_address, offsets: HashMap::new(), entity_lists: HashMap::new() }
+	}
+
+	fn add_offset(&mut self, offsets: (String, Vec<usize>)) {
+		self.offsets.insert(offsets.0, offsets.1);
+	}
+
+	fn show_entity_lists(&self) {
+		for (k, v) in &self.entity_lists {
+			println!("[ENTITYLIST] {} - > {:X}", k, v.start)
+		}
+	}
+
+	fn add_entity_list(&mut self, name: &str, ent_list: EntityList) {
+		self.entity_lists.insert(name.to_string(), ent_list);
+	}
+}
+
 struct EntityList {
 	start: usize,
 	gap: i8,
@@ -26,6 +54,7 @@ struct EntityList {
 	ent_vec: Vec<Entity>
 }
 
+#[derive(Copy, Clone)]
 struct Coords {
 	x: f32,
 	z: f32, 
@@ -56,6 +85,27 @@ impl Entity {
 	
 }
 
+impl std::fmt::Debug for EntityList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let start = format!("0x{:X}", &self.start);
+        f.debug_struct("EntityList")
+		.field("Memory address", &start)
+		.field("Entity count", &self.entity_count)
+		.field("Distance between entities", &self.gap)
+         .field("Entity vector", &self.ent_vec)
+         .finish()
+    }
+}
+
+impl std::fmt::Debug for Entity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let addr = format!("0x{:X}", &self.addr);
+        f.debug_struct("Entity")
+		.field("Memory address", &addr)
+		.field("Entity name", &self.name)
+        .finish()
+    }
+}
 
 impl EntityList {
 	fn new(start: usize, gap: i8, entity_count: i8, handle: HANDLE) -> Self{
@@ -82,9 +132,9 @@ impl EntityList {
 		}
 	}
 
-	// fn remove_entity(&mut self, addr: usize) {
-	// 	self.entity_pointers.retain(|&x| x != addr);
-	// }
+	fn remove_entity(&mut self, addr: usize) {
+		self.ent_vec.retain(|x| x.addr != addr);
+	}
 
 	fn populate(&mut self, ents: i8) {
 		while self.ent_vec.len() < ents.try_into().unwrap() {
@@ -94,38 +144,59 @@ impl EntityList {
 }
 
 fn main() {
-	println!("\nClient loaded successfuly! \n--------------------------\n");
 
-	let pid = get_process_pid(PROCESS_NAME).expect("Unable to locate process");
-	println!("[rust_client] Found target process {:?} ", pid);
-	let proc_addr = get_process_address(pid).expect("ERROR: Couldn't get modBaseAddr of process");
-	println!("[rust_client] Found target process base modBaseAddr {:?} ", proc_addr);
-	let proc_handle = get_process_handle(pid).expect("ERROR: Couldn't get handle to process");
-	println!("[rust_client] Created handle to process with PROCESS_VM_READ");
+	let (game_handle, proc_addr) = process_init("ac_client.exe").expect("Cannot initialise game hack - make sure the game is running");
+	let mut client = Game::new(proc_addr, game_handle);
 
 	let frametime = time::Duration::from_millis(10);
-	if let Some(ent_list_addr) = resolve_pointer_chain(proc_handle, proc_addr, &ENTITY_LIST_START, AddressType::Pointer) {
-		let mut ent_list = EntityList::new(ent_list_addr, 0x4, 5, proc_handle);
+	if let Some(ent_list_addr) = resolve_pointer_chain(client.proc_handle, client.base_address, &ENTITY_LIST_START, AddressType::Pointer) {
+		let mut ent_list = EntityList::new(ent_list_addr, 0x4, 5, client.proc_handle);
 		ent_list.populate(5);
+		client.add_entity_list("Bot player list", ent_list);
+		client.show_entity_lists();
+		for (name, list) in &client.entity_lists {
+			println!("\n----------{}----------\n\n{:#?}", name, list);
+		}
 		loop {
-			let local_player_xpos_addr = read_mem_addr(proc_handle, proc_addr + PLAYER_BASE, 4).unwrap();
-			let local_player_xpos = read_mem_addr(proc_handle, local_player_xpos_addr + ENTITY_COORDS_OFFSET[0], 4).unwrap();
-			let local_player_ypos = read_mem_addr(proc_handle, local_player_xpos_addr + ENTITY_COORDS_OFFSET[1], 4).unwrap();
+			let local_player_xpos_addr = read_mem_addr(client.proc_handle, client.base_address + PLAYER_BASE, 4).unwrap();
+			let local_player_xpos = read_mem_addr(client.proc_handle, local_player_xpos_addr + ENTITY_COORDS_OFFSET[0], 4).unwrap();
+			let local_player_ypos = read_mem_addr(client.proc_handle, local_player_xpos_addr + ENTITY_COORDS_OFFSET[1], 4).unwrap();
 			println!("LocalPlayer -> x: {:.4}, y: {:.4}", f32::from_bits(local_player_xpos as u32), f32::from_bits(local_player_ypos as u32));
-			for bot in &ent_list.ent_vec {
-				let dist = euclid_dist((f32::from_bits(local_player_xpos as u32), f32::from_bits(local_player_ypos as u32)), (bot.position.x, bot.position.y));
-				if dist < 60.0 {
-					println!("BOT {:?} -> {{x: {:.4}, y: {:.4}}} \x1b[93m({}m)\x1b[0m", bot.name, bot.position.x, bot.position.y, dist as u32 / 10);
-
-				}
-				else {
-					println!("BOT {:?} -> {{x: {:.4}, y: {:.4}}} ({}m)", bot.name, bot.position.x, bot.position.y, dist as u32 / 10);
-				}
+			for (name, list) in &client.entity_lists {
+				println!("\n----------{}----------\n\n{:#?}", name, list);
 			}
-			ent_list.refresh();
 			thread::sleep(frametime);
 			print!("{}[2J", 27 as char);
 		}
 	}
-	unsafe { CloseHandle(proc_handle); }
+	unsafe { CloseHandle(client.proc_handle); }
 }
+
+fn process_init(proc_name: &str) -> Result<(usize, HANDLE), String> {
+	let pid = match get_process_pid(proc_name) {
+		Ok(id) => id,
+		Err(_) => return Err("Unable to find game process PID".to_string())
+	};
+	let proc_addr = match get_process_address(pid) {
+		Ok(addr) => addr,
+		Err(_) => return Err("Unable to find game process base address".to_string())
+	};
+	let proc_handle = match get_process_handle(pid) {
+		Ok(handle) => handle,
+		Err(_) => return Err("Unable to get handle to game process".to_string())
+	};
+	println!("[rust_client] Found game process and created handle with PROCESS_VM_READ");
+	Ok((proc_addr, proc_handle))
+}
+
+	// for bot in &ent_list.ent_vec {
+			// 	let dist = euclid_dist((f32::from_bits(local_player_xpos as u32), f32::from_bits(local_player_ypos as u32)), (bot.position.x, bot.position.y));
+			// 	if dist < 60.0 {
+			// 		println!("BOT {:?} -> {{x: {:.4}, y: {:.4}}} \x1b[93m({}m)\x1b[0m", bot.name, bot.position.x, bot.position.y, dist as u32 / 10);
+
+			// 	}
+			// 	else {
+			// 		println!("BOT {:?} -> {{x: {:.4}, y: {:.4}}} ({}m)", bot.name, bot.position.x, bot.position.y, dist as u32 / 10);
+			// 	}
+			// }
+			//ent_list.refresh();

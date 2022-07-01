@@ -18,18 +18,18 @@ pub fn get_process_list() -> Vec<(Pid, String)> {
     return processes;
 }
 
-pub fn get_process_handle(pid: u32) -> Option<HANDLE> {
+pub fn get_process_handle(pid: u32) -> Result<HANDLE, String> {
     let mut entry = PROCESSENTRY32::default();
     entry.dwSize = size_of::<PROCESSENTRY32>() as u32;
     unsafe {
         match CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid) {
             Ok(_handle) => {
                 match OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, false, pid) {
-                    Ok(handle) => return Some(handle),
-                    Err(_) => return None
+                    Ok(handle) => return Ok(handle),
+                    Err(_) => return Err("Unable to get handle to game process.".to_string())
                 }
             }
-            _ => None
+            _ => Err("Unable to find game process when attempted to get handle".to_string())
         }
     }
 }
