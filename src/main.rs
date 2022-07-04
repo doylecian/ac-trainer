@@ -5,10 +5,10 @@ mod math;
 
 use core::time;
 use std::{self, thread};
-use memory::{get_process_pid, get_process_address};
+use memory::{get_process_pid, get_process_address, write_float};
 use structs::{Game, EntityList};
 use windows::Win32::{Foundation::{CloseHandle, HANDLE}, UI::Input::KeyboardAndMouse::GetAsyncKeyState};
-use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType}, math::euclid_dist};
+use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType}};
 
 const PROCESS_NAME: &str = "ac_client.exe";
 const PLAYER_BASE: usize = 0x00109B74;
@@ -27,21 +27,41 @@ fn main() {
 	let mut client = Game::new(proc_addr, game_handle);
 	let frametime = time::Duration::from_millis(10);
 
+	// println!("North East: {:.4}", angle_to_y((3.0, 2.0)));
+	// println!("North West {:.4}", angle_to_y((-3.0, 2.0)));
+	// println!("South West {:.4}", angle_to_y((-3.0, -2.0)));
+	// println!("South East {:.4}", angle_to_y((3.0, -2.0)));
+
 	if let Some(v) = resolve_pointer_chain(client.proc_handle, client.base_address, &Y_VIEW_OFFSETS, AddressType::Pointer) {
 		client.add_address("viewTable".to_string(), v);
 	}
 
-	if let Some(ent_list_addr) = resolve_pointer_chain(client.proc_handle, client.base_address, &ENTITY_LIST_START, AddressType::Pointer) {
-		let mut ent_list = EntityList::new(ent_list_addr, 0x4, 5, client.proc_handle);
-		ent_list.populate(5);
-		client.add_entity_list("Bot player list", ent_list);
-	}
+	// if let Some(ent_list_addr) = resolve_pointer_chain(client.proc_handle, client.base_address, &ENTITY_LIST_START, AddressType::Pointer) {
+	// 	let mut ent_list = EntityList::new(ent_list_addr, 0x4, 5, client.proc_handle);
+	// 	ent_list.populate(5);
+	// 	client.add_entity_list("Bot player list", ent_list);
+	// }
 
 	loop {
 		update(&mut client);
 		thread::sleep(frametime);
 		unsafe {
+			if GetAsyncKeyState(0x02) != 0 {
+				match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x248, 123.0, 4) {
+					Ok(_) => {
+						match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x24C, 0.0, 4) {
+							Ok(_) => println!("Writing to view angle address!"),
+							Err(_) => panic!("Angle")
+						}
+					},
+					Err(msg) => println!("Error message: {:?}", msg)
+				}
+			}
 			if GetAsyncKeyState(0x10) != 0 {
+				match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x248, 123.0, 4) {
+					Ok(_) => println!("Wrote to view angle address"),
+					Err(msg) => println!("Error message: {:?}", msg)
+				}
 				CloseHandle(client.proc_handle);
 				return;
 			}
@@ -58,19 +78,19 @@ fn update(client: &mut Game) {
 	let y_view = read_mem_addr(client.proc_handle, client.value_pointers["viewTable"] + 0x24C, 4).unwrap();
 
 	println!("LocalPlayer -> x: {:.4}, y: {:.4} // xView: {:.4} yView: {:.4}", f32::from_bits(local_player_xpos as u32), f32::from_bits(local_player_ypos as u32), f32::from_bits(x_view as u32), f32::from_bits(y_view as u32));
-	println!("Player count: {}", read_mem_addr(client.proc_handle, client.base_address + PLAYER_COUNT_OFFSET, 4).unwrap());
-	for (_, list) in &mut client.entity_lists {
-		for bot in &list.ent_vec {
-			let dist = euclid_dist((f32::from_bits(local_player_xpos as u32), f32::from_bits(local_player_ypos as u32)), (bot.position.x, bot.position.y));
-			if dist < 60.0 {
-				println!("BOT {:?} -> {{x: {:.4}, y: {:.4}}} \x1b[93m({}m)\x1b[0m", bot.name, bot.position.x, bot.position.y, dist as u32 / 10);
-			}
-			else {
-				println!("BOT {:?} -> {{x: {:.4}, y: {:.4}}} ({}m)", bot.name, bot.position.x, bot.position.y, dist as u32 / 10);
-			}
-		}
-		list.refresh();
-	}
+	//println!("Player count: {}", read_mem_addr(client.proc_handle, client.base_address + PLAYER_COUNT_OFFSET, 4).unwrap());
+	// for (_, list) in &mut client.entity_lists {
+	// 	for bot in &list.ent_vec {
+	// 		let dist = euclid_dist((f32::from_bits(local_player_xpos as u32), f32::from_bits(local_player_ypos as u32)), (bot.position.x, bot.position.y));
+	// 		if dist < 60.0 {
+	// 			println!("BOT {:?} -> {{x: {:.4}, y: {:.4}}} \x1b[93m({}m)\x1b[0m", bot.name, bot.position.x, bot.position.y, dist as u32 / 10);
+	// 		}
+	// 		else {
+	// 			println!("BOT {:?} -> {{x: {:.4}, y: {:.4}}} ({}m)", bot.name, bot.position.x, bot.position.y, dist as u32 / 10);
+	// 		}
+	// 	}
+	// 	list.refresh();
+	// }
 	print!("{}[2J", 27 as char);
 }
 

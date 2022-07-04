@@ -1,7 +1,7 @@
 use std::{mem::size_of, ffi::c_void, ptr};
 
 use sysinfo::{System, SystemExt, ProcessExt, Pid, PidExt};
-use windows::Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::ReadProcessMemory}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION}}, Foundation::{HANDLE, CloseHandle}};
+use windows::Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::{ReadProcessMemory, WriteProcessMemory}}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION, PROCESS_VM_WRITE}}, Foundation::{HANDLE, CloseHandle, GetLastError, WIN32_ERROR}};
 
 pub enum AddressType {
     Pointer,
@@ -24,7 +24,7 @@ pub fn get_process_handle(pid: u32) -> Result<HANDLE, String> {
     unsafe {
         match CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid) {
             Ok(_handle) => {
-                match OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, false, pid) {
+                match OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION | PROCESS_VM_WRITE, false, pid) {
                     Ok(handle) => return Ok(handle),
                     Err(_) => return Err("Unable to get handle to game process.".to_string())
                 }
@@ -72,6 +72,35 @@ pub fn read_mem_addr(handle: HANDLE, addr: usize, buffer_size: i8) -> Option<usi
         else { None }
     }
 }
+
+// TODO: Unify with write_mem_addr
+pub fn write_float(handle: HANDLE, addr: usize, data: f32, buffer_size: i32) -> Result<bool, WIN32_ERROR> {
+    let bytes: *mut usize = ptr::null_mut();
+    let lp_buffer: *const c_void = <*const _>::cast(&data);
+    unsafe {
+        if WriteProcessMemory(handle, addr as *const c_void, lp_buffer, buffer_size as usize, bytes).as_bool() {
+            return Ok(true);
+        }
+        else {
+            Err(GetLastError())
+        }
+    }
+}
+
+// TODO: Unify with write_float
+pub fn write_mem_addr(handle: HANDLE, addr: usize, data: usize, buffer_size: i32) -> Result<bool, WIN32_ERROR> {
+    let bytes: *mut usize = ptr::null_mut();
+    let lp_buffer: *const c_void = <*const _>::cast(&data);
+    unsafe {
+        if WriteProcessMemory(handle, addr as *const c_void, lp_buffer, buffer_size as usize, bytes).as_bool() {
+            return Ok(true);
+        }
+        else {
+            Err(GetLastError())
+        }
+    }
+}
+
 
 pub fn resolve_pointer_chain(handle: HANDLE, base_addr: usize, offsets: &[usize], addr_type: AddressType) -> Option<usize> {
     let mut final_addr = base_addr;
