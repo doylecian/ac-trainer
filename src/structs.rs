@@ -7,7 +7,7 @@ use crate::{memory::read_mem_addr, ENTITY_COORDS_OFFSET, ENTITY_NAME_OFFSET};
 pub struct Game {
 	pub proc_handle: HANDLE,
 	pub base_address: usize,
-	pub offsets: HashMap<String, Vec<usize>>,
+	pub value_pointers: HashMap<String, usize>,
 	pub entity_lists: HashMap<String, EntityList>
 }
 
@@ -36,11 +36,11 @@ pub struct Entity {
 
 impl Game {
 	pub fn new(proc_handle: HANDLE, base_address: usize) -> Self {
-		Self { proc_handle, base_address, offsets: HashMap::new(), entity_lists: HashMap::new() }
+		Self { proc_handle, base_address, value_pointers: HashMap::new(), entity_lists: HashMap::new() }
 	}
 
-	pub fn add_offset(&mut self, offsets: (String, Vec<usize>)) {
-		self.offsets.insert(offsets.0, offsets.1);
+	pub fn add_address(&mut self, value: String, address: usize) {
+		self.value_pointers.insert(value, address);
 	}
 
 	pub fn show_entity_lists(&self) {
