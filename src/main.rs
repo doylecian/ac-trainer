@@ -8,7 +8,7 @@ use std::{self, thread};
 use memory::{get_process_pid, get_process_address, write_float};
 use structs::{Game, EntityList};
 use windows::Win32::{Foundation::{CloseHandle, HANDLE}, UI::Input::KeyboardAndMouse::GetAsyncKeyState};
-use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType}};
+use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType}, math::euclid_dist};
 
 const PROCESS_NAME: &str = "ac_client.exe";
 const PLAYER_BASE: usize = 0x00109B74;
@@ -43,9 +43,10 @@ fn main() {
 			if GetAsyncKeyState(0x02) != 0 {
 				match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x248, 123.0, 4) {
 					Ok(_) => {
+						println!("Changed view yaw");
 						match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x24C, 0.0, 4) {
-							Ok(_) => println!("Writing to view angle address!"),
-							Err(_) => panic!("Angle")
+							Ok(_) => println!("Changed view pitch"),
+							Err(_) => println!("Couldn't write to view angle address!"),
 						}
 					},
 					Err(msg) => println!("Error message: {:?}", msg)
