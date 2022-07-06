@@ -1,7 +1,7 @@
-use std::{mem::size_of, ffi::c_void, ptr};
+use std::{mem::{size_of, size_of_val}, ffi::c_void, ptr};
 
 use sysinfo::{System, SystemExt, ProcessExt, Pid, PidExt};
-use windows::Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::{ReadProcessMemory, WriteProcessMemory}}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION, PROCESS_VM_WRITE}}, Foundation::{HANDLE, CloseHandle, GetLastError, WIN32_ERROR}};
+use windows::Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::{ReadProcessMemory, WriteProcessMemory}}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION, PROCESS_VM_WRITE, GetCurrentProcess, PROCESS_VM_OPERATION}, Memory::{VirtualQueryEx, MEMORY_BASIC_INFORMATION, VirtualProtect, PAGE_PROTECTION_FLAGS, VirtualProtectEx}}, Foundation::{HANDLE, CloseHandle, GetLastError, WIN32_ERROR}};
 
 pub enum AddressType {
     Pointer,
@@ -24,7 +24,7 @@ pub fn get_process_handle(pid: u32) -> Result<HANDLE, String> {
     unsafe {
         match CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid) {
             Ok(_handle) => {
-                match OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION | PROCESS_VM_WRITE, false, pid) {
+                match OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION | PROCESS_VM_WRITE | PROCESS_VM_OPERATION, false, pid) {
                     Ok(handle) => return Ok(handle),
                     Err(_) => return Err("Unable to get handle to game process.".to_string())
                 }
@@ -127,4 +127,19 @@ pub fn resolve_pointer_chain(handle: HANDLE, base_addr: usize, offsets: &[usize]
     }
 }
 
+// Replace instruction at memory address with NOP instruction
+pub fn nop_address(handle: HANDLE, addr: usize) -> Result<String, WIN32_ERROR> {
+    match write_mem_addr(handle, addr, 0x90, 1) {
+        Ok(_) => return Ok(format!("NOP instruction placed at {:X}", addr)),
+        Err(e) => Err(e)
+    }
+}
 
+// VirtualProtectEx(handle, addr as *const c_void, 487424, PAGE_PROTECTION_FLAGS(4), &mut old_proc_flags);
+// VirtualProtectEx(handle, addr as *const c_void, 487424, old_proc_flags, &mut old_proc_flags);
+// let mut mbi = MEMORY_BASIC_INFORMATION::default();
+// let buff = size_of_val(&mbi);
+// unsafe {
+//     VirtualQueryEx(handle, addr as *const c_void, &mut mbi, buff);
+// }
+// println!("MBI {:?}", mbi);

@@ -1,11 +1,12 @@
 #![allow(dead_code)]
+#![allow(unused_imports)]
 mod memory;
 mod structs;
 mod math;
 
 use core::time;
 use std::{self, thread};
-use memory::{get_process_pid, get_process_address, write_float};
+use memory::{get_process_pid, get_process_address, write_float, nop_address};
 use structs::{Game, EntityList};
 use windows::Win32::{Foundation::{CloseHandle, HANDLE}, UI::Input::KeyboardAndMouse::GetAsyncKeyState};
 use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType}, math::euclid_dist};
@@ -102,4 +103,15 @@ fn process_init(proc_name: &str) -> Result<(usize, HANDLE), String> {
 	Ok((proc_addr, proc_handle))
 }
 
-	
+#[test]
+fn get_handle_to_game() {
+    process_init("ac_client.exe").expect("Failed to get handle to game process");
+}
+
+#[test]
+fn nop_ammo_instruction() {
+	let (_, proc_addr) = process_init("ac_client.exe").expect("Cannot get handle to game process");
+    nop_address(proc_addr, 0x004637E9).expect("Failed to place NOP instruction at 0x004637E9");
+	nop_address(proc_addr, 0x004637EA).expect("Failed to place NOP instruction at 0x004637EA");
+}
+
