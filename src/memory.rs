@@ -101,6 +101,22 @@ pub fn write_mem_addr(handle: HANDLE, addr: usize, data: usize, buffer_size: i32
     }
 }
 
+//TODO: enum semantics
+
+/// Resolves a chain of pointers to the final address or the contents of the final address. Necessary for finding the location of 
+/// values in memory when games use dynamic memory allocation
+///
+/// # Arguments
+///
+/// * `handle` - A handle to the game process, which must have read access.
+/// * `base_addr` - The base address of the game process or module.
+/// * `offsets` - An array containing the hexadecimal offsets required for each level in the chain.
+/// * `addr_type` - The type of address at the end of the chain. For some data structures, it may be desirable to pass the Value type and stop 1 level below.
+///
+/// # Returns
+/// 
+/// If the pointer chain could be resolved, `Some()` will contain the memory address at the end of the chain.
+/// If unsuccessful, `None` will be returned
 
 pub fn resolve_pointer_chain(handle: HANDLE, base_addr: usize, offsets: &[usize], addr_type: AddressType) -> Option<usize> {
     let mut final_addr = base_addr;
@@ -127,7 +143,18 @@ pub fn resolve_pointer_chain(handle: HANDLE, base_addr: usize, offsets: &[usize]
     }
 }
 
-// Replace instruction at memory address with NOP instruction
+/// Patches a NOP instruction at the memory address provided
+///
+/// # Arguments
+///
+/// * `handle` - A handle to the game process, which must have write access
+/// * `addr` - A memory address at which to patch the NOP instruction
+///
+/// # Returns
+/// 
+/// If the patch was successful, `Ok()` will contain a message indicating the address that was patched.
+/// If unsuccessful, `Err()` will return the windows error code encountered when trying to call `WriteProcessMemory`
+
 pub fn nop_address(handle: HANDLE, addr: usize) -> Result<String, WIN32_ERROR> {
     match write_mem_addr(handle, addr, 0x90, 1) {
         Ok(_) => return Ok(format!("NOP instruction placed at {:X}", addr)),

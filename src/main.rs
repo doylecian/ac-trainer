@@ -103,15 +103,19 @@ fn process_init(proc_name: &str) -> Result<(usize, HANDLE), String> {
 	Ok((proc_addr, proc_handle))
 }
 
-#[test]
-fn get_handle_to_game() {
-    process_init("ac_client.exe").expect("Failed to get handle to game process");
-}
+#[cfg(test)]
+mod tests {
+    use crate::{process_init, memory::nop_address};
 
-#[test]
-fn nop_ammo_instruction() {
-	let (_, proc_addr) = process_init("ac_client.exe").expect("Cannot get handle to game process");
-    nop_address(proc_addr, 0x004637E9).expect("Failed to place NOP instruction at 0x004637E9");
-	nop_address(proc_addr, 0x004637EA).expect("Failed to place NOP instruction at 0x004637EA");
+    #[test]
+	fn get_handle_to_game() {
+		process_init("ac_client.exe").expect("Failed to get handle to game process");
+	}
+	
+	#[test]
+	fn nop_ammo_instruction() {
+		let (_, proc_addr) = process_init("ac_client.exe").expect("Cannot get handle to game process");
+		nop_address(proc_addr, 0x004637E9).expect("Failed to place NOP instruction at 0x004637E9");
+		nop_address(proc_addr, 0x004637EA).expect("Failed to place NOP instruction at 0x004637EA");
+	}	
 }
-
