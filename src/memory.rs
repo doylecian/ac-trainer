@@ -1,7 +1,7 @@
 use std::{mem::{size_of, size_of_val}, ffi::c_void, ptr};
 
 use sysinfo::{System, SystemExt, ProcessExt, Pid, PidExt};
-use windows::Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::{ReadProcessMemory, WriteProcessMemory}}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION, PROCESS_VM_WRITE, GetCurrentProcess, PROCESS_VM_OPERATION}, Memory::{VirtualQueryEx, MEMORY_BASIC_INFORMATION, VirtualProtect, PAGE_PROTECTION_FLAGS, VirtualProtectEx}}, Foundation::{HANDLE, CloseHandle, GetLastError, WIN32_ERROR}};
+use windows::{Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::{ReadProcessMemory, WriteProcessMemory}}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION, PROCESS_VM_WRITE, GetCurrentProcess, PROCESS_VM_OPERATION}, Memory::{VirtualQueryEx, MEMORY_BASIC_INFORMATION, VirtualProtect, PAGE_PROTECTION_FLAGS, VirtualProtectEx}, ProcessStatus::{K32EnumProcessModulesEx, LIST_MODULES_32BIT, K32GetModuleBaseNameA}}, Foundation::{HANDLE, CloseHandle, GetLastError, WIN32_ERROR, HINSTANCE}}, core::PSTR};
 
 pub enum AddressType {
     Pointer,
@@ -33,6 +33,41 @@ pub fn get_process_handle(pid: u32) -> Result<HANDLE, String> {
         }
     }
 }
+
+pub fn get_module_handles(handle: HANDLE) -> Result<[HINSTANCE; 100], String> {
+    let mut module_array: [HINSTANCE; 100] = [HINSTANCE::default(); 100];
+    let module_array_ptr =  &mut module_array[0];
+    let mut bytes_needed: u32 = 0;
+    let size: u32 = (100*size_of::<HINSTANCE>()).try_into().unwrap();
+
+    unsafe {
+        if K32EnumProcessModulesEx(handle, &mut *module_array_ptr, size, &mut bytes_needed, LIST_MODULES_32BIT).as_bool() {
+            println!("Got module list, bytes needed: {}, bytes given: {}", bytes_needed, size);
+            return Ok(module_array);
+        }
+    }
+    Err(format!("Couldn't get module handles {:?}", bytes_needed))
+}
+
+pub fn get_module_base_name(handle: HANDLE, instance: HINSTANCE) -> Result<String, String> {
+
+    let mut mod_name: [u8; 50] = [0; 50];
+
+    unsafe {
+        if K32GetModuleBaseNameA(handle, instance, &mut mod_name) != 0 {
+            match std::str::from_utf8(&mod_name) {
+                Ok(str) => return Ok(String::from(str)),
+                Err(_) => Err("Couldn't convert name to utf8".to_string()),
+            }
+        }
+        else {
+            Err("Couldn't get module name".to_string())
+        }
+    }
+
+}
+
+
 
 pub fn get_process_pid(name: &str) -> Result<u32, String> {
     for (p_id, p_name) in get_process_list() {
@@ -121,7 +156,7 @@ pub fn write_mem_addr(handle: HANDLE, addr: usize, data: usize, buffer_size: i32
 pub fn resolve_pointer_chain(handle: HANDLE, base_addr: usize, offsets: &[usize], addr_type: AddressType) -> Option<usize> {
     let mut final_addr = base_addr;
     match addr_type {
-        AddressType::Pointer => {
+        AddressType::Value => {
             for o in offsets {
                 if let Some(resolved) = read_mem_addr(handle, final_addr + o, 4) {
                     final_addr = resolved;
@@ -130,7 +165,7 @@ pub fn resolve_pointer_chain(handle: HANDLE, base_addr: usize, offsets: &[usize]
             }
             return Some(final_addr)
         },
-        AddressType::Value => {
+        AddressType::Pointer => {
             for o in &offsets[..offsets.len() - 1] {
                 if let Some(resolved) = read_mem_addr(handle, final_addr + o, 4) {
                     final_addr = resolved;
@@ -160,6 +195,12 @@ pub fn nop_address(handle: HANDLE, addr: usize) -> Result<String, WIN32_ERROR> {
         Ok(_) => return Ok(format!("NOP instruction placed at {:X}", addr)),
         Err(e) => Err(e)
     }
+}
+
+pub fn jmp_address(handle: HANDLE, jmp_from: usize, jmp_to: usize) -> Result<String, WIN32_ERROR> {
+    write_mem_addr(handle, jmp_from, 0xE9, 5)?; 
+    write_mem_addr(handle, jmp_to + 5, jmp_to, 4)?;
+    return Ok(format!("JMP instruction placed at {:X} to {:X}", jmp_from, jmp_to))
 }
 
 // VirtualProtectEx(handle, addr as *const c_void, 487424, PAGE_PROTECTION_FLAGS(4), &mut old_proc_flags);

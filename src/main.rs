@@ -6,9 +6,10 @@ mod math;
 
 use core::time;
 use std::{self, thread};
-use memory::{get_process_pid, get_process_address, write_float, nop_address};
+use memory::{get_process_pid, get_process_address, write_float, nop_address, jmp_address, get_module_handles, get_module_base_name};
 use structs::{Game, EntityList};
-use windows::Win32::{Foundation::{CloseHandle, HANDLE}, UI::Input::KeyboardAndMouse::GetAsyncKeyState};
+use windows::Win32::{Foundation::{CloseHandle, HANDLE, HINSTANCE}, UI::Input::KeyboardAndMouse::GetAsyncKeyState, Graphics::Gdi::HDC};
+
 use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType}, math::euclid_dist};
 
 const PROCESS_NAME: &str = "ac_client.exe";
@@ -16,49 +17,63 @@ const PLAYER_BASE: usize = 0x00109B74;
 const PLAYER_HEALTH_0FFSETS: [usize; 2] = [PLAYER_BASE, 0xF8];
 const PLAYER_VIEW_YAW_OFFSETS: [usize; 2] = [PLAYER_BASE, 0x0040];
 const PLAYER_VIEW_PITCH_OFFSETS: [usize; 2] = [PLAYER_BASE, 0x0044];
-const ENTITY_LIST_START: [usize; 1] = [0x10f4f8];
+const ENTITY_LIST_START: usize = 0x10f4f8;
 const ENTITY_COORDS_OFFSET: [usize; 3] = [0x4, 0x8, 0xc];
 const ENTITY_NAME_OFFSET: usize = 0x224;
 const PLAYER_COUNT_OFFSET: usize = 0x10F500;
 const Y_VIEW_OFFSETS: [usize; 5] = [0x0010A280, 0x8, 0x214, 0x70, 0x6c];
+
+type TWglSwapBuffers = fn(handle_device_context: HDC) -> bool;
 
 fn main() {
 
 	let (game_handle, proc_addr) = process_init("ac_client.exe").expect("Cannot initialise game hack - make sure the game is running");
 	let mut client = Game::new(proc_addr, game_handle);
 
-	if let Some(v) = resolve_pointer_chain(client.proc_handle, client.base_address, &Y_VIEW_OFFSETS, AddressType::Pointer) {
+	if let Some(v) = resolve_pointer_chain(client.proc_handle, client.base_address, &Y_VIEW_OFFSETS, AddressType::Value) {
 		client.add_address("viewTable".to_string(), v);
 	}
 
-	if let Some(ent_list_addr) = resolve_pointer_chain(client.proc_handle, client.base_address, &ENTITY_LIST_START, AddressType::Pointer) {
-		let mut ent_list = EntityList::new(ent_list_addr, 0x4, 5, client.proc_handle);
-		ent_list.populate(5);
-		client.add_entity_list("Bot player list", ent_list);
-	}
+	// if let Some(ent_list_addr) = resolve_pointer_chain(client.proc_handle, client.base_address, &[ENTITY_LIST_START], AddressType::Value) {
+	// 	let mut ent_list = EntityList::new(ent_list_addr, 0x4, 5, client.proc_handle);
+	// 	ent_list.populate(5);
+	// 	client.add_entity_list("Bot player list", ent_list);
+	// }
 
-	loop {
-		update(&mut client);
-		thread::sleep(time::Duration::from_millis(10));
-		unsafe {
-			if GetAsyncKeyState(0x02) != 0 {
-				match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x248, 123.0, 4) {
-					Ok(_) => {
-						println!("Changed view yaw");
-						match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x24C, 0.0, 4) {
-							Ok(_) => println!("Changed view pitch"),
-							Err(_) => println!("Couldn't write to view angle address!"),
-						}
-					},
-					Err(msg) => println!("Error message: {:?}", msg)
-				}
-			}
-			if GetAsyncKeyState(0x10) != 0 {
-				CloseHandle(client.proc_handle);
-				return;
+	//jmp_address(client.proc_handle, 0x4637F4, 0x463800).expect("Error");
+	match get_module_handles(client.proc_handle) {
+		Ok(handles) => {
+			for process in handles {
+				let name = get_module_base_name(client.proc_handle, process).unwrap();
+				let name = name.trim_matches(char::from(0));
+				println!("{:X} - {:?}", process.0, name)
 			}
 		}
+		Err(msg) => panic!("{}", msg)
 	}
+
+	// loop {
+	// 	update(&mut client);
+	// 	thread::sleep(time::Duration::from_millis(10));
+	// 	unsafe {
+	// 		if GetAsyncKeyState(0x02) != 0 {
+	// 			match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x248, 123.0, 4) {
+	// 				Ok(_) => {
+	// 					println!("Changed view yaw");
+	// 					match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x24C, 0.0, 4) {
+	// 						Ok(_) => println!("Changed view pitch"),
+	// 						Err(_) => println!("Couldn't write to view angle address!"),
+	// 					}
+	// 				},
+	// 				Err(msg) => println!("Error message: {:?}", msg)
+	// 			}
+	// 		}
+	// 		if GetAsyncKeyState(0x10) != 0 {
+	// 			CloseHandle(client.proc_handle);
+	// 			return;
+	// 		}
+	// 	}
+	// }
 }
 
 fn update(client: &mut Game) {		
