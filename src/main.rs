@@ -1,16 +1,19 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case_types)]
+
 mod memory;
 mod structs;
 mod math;
 
 use core::time;
-use std::{self, thread};
-use memory::{get_process_pid, get_process_address, write_float, nop_address, jmp_address, get_module_handles, get_module_base_name};
+use std::{self, thread, intrinsics::transmute};
+use memory::{get_process_pid, get_process_address, write_float, nop_address, get_module_handles, get_module_base_name, get_loaded_module, write_mem_addr, detour};
 use structs::{Game, EntityList};
-use windows::Win32::{Foundation::{CloseHandle, HANDLE, HINSTANCE}, UI::Input::KeyboardAndMouse::GetAsyncKeyState, Graphics::Gdi::HDC};
+use windows::Win32::{Foundation::{CloseHandle, HANDLE, HINSTANCE, GetLastError}, UI::Input::KeyboardAndMouse::GetAsyncKeyState, Graphics::Gdi::HDC, System::{LibraryLoader::{GetProcAddress, LoadLibraryA}, Threading::GetCurrentProcess}};
 
-use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType}, math::euclid_dist};
+use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType, get_exported_function_offset}, math::euclid_dist};
 
 const PROCESS_NAME: &str = "ac_client.exe";
 const PLAYER_BASE: usize = 0x00109B74;
@@ -23,7 +26,8 @@ const ENTITY_NAME_OFFSET: usize = 0x224;
 const PLAYER_COUNT_OFFSET: usize = 0x10F500;
 const Y_VIEW_OFFSETS: [usize; 5] = [0x0010A280, 0x8, 0x214, 0x70, 0x6c];
 
-type TWglSwapBuffers = fn(handle_device_context: HDC) -> bool;
+type wglSwapBuffers_t = extern "system" fn(hdc: HDC) -> bool;
+static mut wglSwapBuffers_o: Option<wglSwapBuffers_t> = None;
 
 fn main() {
 
@@ -41,17 +45,25 @@ fn main() {
 	// }
 
 	//jmp_address(client.proc_handle, 0x4637F4, 0x463800).expect("Error");
+
+	// List games imported modules
 	match get_module_handles(client.proc_handle) {
 		Ok(handles) => {
-			for process in handles {
-				let name = get_module_base_name(client.proc_handle, process).unwrap();
-				let name = name.trim_matches(char::from(0));
-				println!("{:X} - {:?}", process.0, name)
+			for instance in handles.iter().filter(|x| x.0 != 0) {
+				let name = get_module_base_name(client.proc_handle, *instance).unwrap();
+				println!("{:X} - {:?}", instance.0, name);
 			}
 		}
 		Err(msg) => panic!("{}", msg)
 	}
 
+	unsafe {
+		let wgl_swap_buffers_offset = get_exported_function_offset(GetCurrentProcess(), "opengl32.dll", "wglSwapBuffers").unwrap();
+		println!("Found wglSwapBuffers offset -> {:X}", wgl_swap_buffers_offset);
+	}
+
+	//detour(client.proc_handle, 0x4637f7, 0x463808); // 8 byte jump
+	
 	// loop {
 	// 	update(&mut client);
 	// 	thread::sleep(time::Duration::from_millis(10));
@@ -75,6 +87,12 @@ fn main() {
 	// 	}
 	// }
 }
+
+unsafe extern "system" fn wglSwapBuffers_h(hdc: HDC) -> bool  {
+
+	return wglSwapBuffers_o.unwrap()(hdc)
+}
+
 
 fn update(client: &mut Game) {		
 	client.show_entity_lists();

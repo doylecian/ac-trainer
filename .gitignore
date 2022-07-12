@@ -2,3 +2,4 @@
 *.swp
 *.txt
 _*.rs
+/.vscode

@@ -1,7 +1,7 @@
-use std::{mem::{size_of, size_of_val}, ffi::c_void, ptr};
+use std::{mem::{size_of, size_of_val}, ffi::c_void, ptr::{self, eq}};
 
 use sysinfo::{System, SystemExt, ProcessExt, Pid, PidExt};
-use windows::{Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::{ReadProcessMemory, WriteProcessMemory}}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION, PROCESS_VM_WRITE, GetCurrentProcess, PROCESS_VM_OPERATION}, Memory::{VirtualQueryEx, MEMORY_BASIC_INFORMATION, VirtualProtect, PAGE_PROTECTION_FLAGS, VirtualProtectEx}, ProcessStatus::{K32EnumProcessModulesEx, LIST_MODULES_32BIT, K32GetModuleBaseNameA}}, Foundation::{HANDLE, CloseHandle, GetLastError, WIN32_ERROR, HINSTANCE}}, core::PSTR};
+use windows::{Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::{ReadProcessMemory, WriteProcessMemory}}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION, PROCESS_VM_WRITE, GetCurrentProcess, PROCESS_VM_OPERATION}, Memory::{VirtualQueryEx, MEMORY_BASIC_INFORMATION, VirtualProtect, PAGE_PROTECTION_FLAGS, VirtualProtectEx, VirtualAlloc, VirtualAllocEx, MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE}, ProcessStatus::{K32EnumProcessModulesEx, LIST_MODULES_32BIT, K32GetModuleBaseNameA, LIST_MODULES_ALL}, LibraryLoader::{LoadLibraryA, GetProcAddress}}, Foundation::{HANDLE, CloseHandle, GetLastError, WIN32_ERROR, HINSTANCE, FARPROC}}, core::PSTR};
 
 pub enum AddressType {
     Pointer,
@@ -39,9 +39,8 @@ pub fn get_module_handles(handle: HANDLE) -> Result<[HINSTANCE; 100], String> {
     let module_array_ptr =  &mut module_array[0];
     let mut bytes_needed: u32 = 0;
     let size: u32 = (100*size_of::<HINSTANCE>()).try_into().unwrap();
-
     unsafe {
-        if K32EnumProcessModulesEx(handle, &mut *module_array_ptr, size, &mut bytes_needed, LIST_MODULES_32BIT).as_bool() {
+        if K32EnumProcessModulesEx(handle, &mut *module_array_ptr, size, &mut bytes_needed, LIST_MODULES_ALL).as_bool() {
             println!("Got module list, bytes needed: {}, bytes given: {}", bytes_needed, size);
             return Ok(module_array);
         }
@@ -50,13 +49,11 @@ pub fn get_module_handles(handle: HANDLE) -> Result<[HINSTANCE; 100], String> {
 }
 
 pub fn get_module_base_name(handle: HANDLE, instance: HINSTANCE) -> Result<String, String> {
-
     let mut mod_name: [u8; 50] = [0; 50];
-
     unsafe {
         if K32GetModuleBaseNameA(handle, instance, &mut mod_name) != 0 {
             match std::str::from_utf8(&mod_name) {
-                Ok(str) => return Ok(String::from(str)),
+                Ok(str) => return Ok(str.trim_matches(char::from(0)).to_string()),
                 Err(_) => Err("Couldn't convert name to utf8".to_string()),
             }
         }
@@ -64,9 +61,41 @@ pub fn get_module_base_name(handle: HANDLE, instance: HINSTANCE) -> Result<Strin
             Err("Couldn't get module name".to_string())
         }
     }
-
 }
 
+pub fn get_loaded_module(handle: HANDLE, name: String) -> Result<HINSTANCE, String> {
+    match get_module_handles(handle) {
+        Ok(instances) => {
+            for module in instances.iter().filter(|x| x.0 != 0) {
+                if get_module_base_name(handle, *module)? == name {
+                    return Ok(*module)
+                }
+            }
+            return Err(format!("Couldn't find loaded module named {}", name))
+        }
+        Err(e) => return Err(e)
+    }
+}
+
+// Returns relative address of function from module
+
+pub fn get_exported_function_offset(handle: HANDLE, module_name: &str, func_name: &str) -> Result<usize, String> {
+    unsafe {
+        match LoadLibraryA(module_name) { // Load it in
+            Ok(instance) => {
+                println!("Calling get_loaded with handle: {:?} and name: {:?} instance is {:X}", handle, module_name.to_string(), instance.0);
+                let loaded_addr = get_loaded_module(handle, module_name.to_string())?;
+                println!("Base module loaded at {:X}", instance.0);
+                let func_relative_addr: usize = std::mem::transmute(GetProcAddress(instance, func_name));
+                println!("fun_rec {:X}", func_relative_addr);
+                let rel = func_relative_addr - loaded_addr.0 as usize;
+                return Ok(rel)
+                //return func_relative_addr - get_loaded_module(GetCurrentProcess(), module_name.to_string())
+            },
+            Err(e) => Err(e.to_string())
+        }
+	}
+}
 
 
 pub fn get_process_pid(name: &str) -> Result<u32, String> {
@@ -128,6 +157,7 @@ pub fn write_mem_addr(handle: HANDLE, addr: usize, data: usize, buffer_size: i32
     let lp_buffer: *const c_void = <*const _>::cast(&data);
     unsafe {
         if WriteProcessMemory(handle, addr as *const c_void, lp_buffer, buffer_size as usize, bytes).as_bool() {
+            println!("[log] Wrote {:?} bytes to {:X}", bytes, addr);
             return Ok(true);
         }
         else {
@@ -197,11 +227,35 @@ pub fn nop_address(handle: HANDLE, addr: usize) -> Result<String, WIN32_ERROR> {
     }
 }
 
-pub fn jmp_address(handle: HANDLE, jmp_from: usize, jmp_to: usize) -> Result<String, WIN32_ERROR> {
-    write_mem_addr(handle, jmp_from, 0xE9, 5)?; 
-    write_mem_addr(handle, jmp_to + 5, jmp_to, 4)?;
+pub fn detour(handle: HANDLE, jmp_from: usize, jmp_to: usize) -> Result<String, WIN32_ERROR> {
+    let relative_jmp = jmp_to - jmp_from - 5;
+    write_mem_addr(handle, jmp_from, 0xE9, 1)?;
+    write_mem_addr(handle, jmp_from + 1, relative_jmp, 4)?;
     return Ok(format!("JMP instruction placed at {:X} to {:X}", jmp_from, jmp_to))
 }
+
+
+// pub unsafe fn trampoline_hook(handle: HANDLE, target_func: usize, src_func: usize, bytes: i32) -> Result<usize, WIN32_ERROR> {
+//     //Create Gateway
+//     let gateway = VirtualAllocEx(handle, ptr::null(), bytes as usize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE) as usize;
+
+// 	// Write stolen bytes to gateway
+//     write_mem_addr(handle, gateway, target_func, bytes)?;
+
+//     let getway_rel = target_func - gateway - 5;
+
+//     write_mem_addr(handle, jmp_from, 0xE9, 5)?; 
+
+// 	// Get the gateway to destination address
+
+// 	// Add jmp opcode to the end of the gateway
+
+// 	// Write address of gateway to the jmp
+
+// 	// Perform detour
+// }
+
+
 
 // VirtualProtectEx(handle, addr as *const c_void, 487424, PAGE_PROTECTION_FLAGS(4), &mut old_proc_flags);
 // VirtualProtectEx(handle, addr as *const c_void, 487424, old_proc_flags, &mut old_proc_flags);
@@ -211,3 +265,4 @@ pub fn jmp_address(handle: HANDLE, jmp_from: usize, jmp_to: usize) -> Result<Str
 //     VirtualQueryEx(handle, addr as *const c_void, &mut mbi, buff);
 // }
 // println!("MBI {:?}", mbi);
+
