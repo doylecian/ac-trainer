@@ -9,11 +9,11 @@ mod math;
 
 use core::time;
 use std::{self, thread, intrinsics::transmute};
-use memory::{get_process_pid, get_process_address, write_float, nop_address, get_module_handles, get_module_base_name, get_loaded_module, write_mem_addr, detour};
+use memory::{get_process_pid, get_process_address, write_float, nop_address, get_module_handles, get_module_base_name, get_loaded_module, write_mem_addr, detour, trampoline_hook};
 use structs::{Game, EntityList};
-use windows::Win32::{Foundation::{CloseHandle, HANDLE, HINSTANCE, GetLastError}, UI::Input::KeyboardAndMouse::GetAsyncKeyState, Graphics::Gdi::HDC, System::{LibraryLoader::{GetProcAddress, LoadLibraryA}, Threading::GetCurrentProcess}};
+use windows::Win32::{Foundation::{CloseHandle, HANDLE, HINSTANCE, GetLastError, FARPROC}, UI::Input::KeyboardAndMouse::GetAsyncKeyState, Graphics::Gdi::HDC, System::{LibraryLoader::{GetProcAddress, LoadLibraryA}, Threading::{GetCurrentProcess, GetExitCodeProcess}}};
 
-use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType, get_exported_function_offset}, math::euclid_dist};
+use crate::{memory::{get_process_handle, resolve_pointer_chain, read_mem_addr, AddressType, get_exported_function_address}, math::euclid_dist};
 
 const PROCESS_NAME: &str = "ac_client.exe";
 const PLAYER_BASE: usize = 0x00109B74;
@@ -26,8 +26,7 @@ const ENTITY_NAME_OFFSET: usize = 0x224;
 const PLAYER_COUNT_OFFSET: usize = 0x10F500;
 const Y_VIEW_OFFSETS: [usize; 5] = [0x0010A280, 0x8, 0x214, 0x70, 0x6c];
 
-type wglSwapBuffers_t = extern "system" fn(hdc: HDC) -> bool;
-static mut wglSwapBuffers_o: Option<wglSwapBuffers_t> = None;
+//type wglSwapBuffers_t = Option<unsafe extern "system" fn(hdc: HDC) -> bool>;
 
 fn main() {
 
@@ -58,39 +57,58 @@ fn main() {
 	}
 
 	unsafe {
-		let wgl_swap_buffers_offset = get_exported_function_offset(GetCurrentProcess(), "opengl32.dll", "wglSwapBuffers").unwrap();
-		println!("Found wglSwapBuffers offset -> {:X}", wgl_swap_buffers_offset);
+		let wglSwapBuffers_o = get_exported_function_address(client.proc_handle, "opengl32.dll", "wglSwapBuffers");
+		match wglSwapBuffers_o {
+			Some(addr) => {
+				println!("Found wglSwapBuffers address -> {:X}", addr);
+				let maddr = wglSwapBuffers_h as usize;
+				println!("My function address -> {:X}", maddr);
+			}
+    		None =>println!("Error"),
+		}
 	}
 
-	//detour(client.proc_handle, 0x4637f7, 0x463808); // 8 byte jump
-	
-	// loop {
-	// 	update(&mut client);
-	// 	thread::sleep(time::Duration::from_millis(10));
-	// 	unsafe {
-	// 		if GetAsyncKeyState(0x02) != 0 {
-	// 			match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x248, 123.0, 4) {
-	// 				Ok(_) => {
-	// 					println!("Changed view yaw");
-	// 					match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x24C, 0.0, 4) {
-	// 						Ok(_) => println!("Changed view pitch"),
-	// 						Err(_) => println!("Couldn't write to view angle address!"),
-	// 					}
-	// 				},
-	// 				Err(msg) => println!("Error message: {:?}", msg)
-	// 			}
-	// 		}
-	// 		if GetAsyncKeyState(0x10) != 0 {
-	// 			CloseHandle(client.proc_handle);
-	// 			return;
-	// 		}
-	// 	}
+
+	// unsafe {
+	// 	let wgl_swap_buffers_offset = get_exported_function_offset(GetCurrentProcess(), "opengl32.dll", "wglSwapBuffers").unwrap();
+	// 	println!("Found wglSwapBuffers offset -> {:X}", wgl_swap_buffers_offset);
 	// }
+
+	//detour(client.proc_handle, 0x4637f7, 0x463808); // 8 byte jump
+
+	loop {
+		update(&mut client);
+		thread::sleep(time::Duration::from_millis(10));
+		unsafe {
+			if GetAsyncKeyState(0x02) != 0 {
+				match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x248, 123.0, 4) {
+					Ok(_) => {
+						println!("Changed view yaw");
+						match write_float(client.proc_handle, client.value_pointers["viewTable"] + 0x24C, 0.0, 4) {
+							Ok(_) => println!("Changed view pitch"),
+							Err(_) => println!("Couldn't write to view angle address!"),
+						}
+					},
+					Err(msg) => println!("Error message: {:?}", msg)
+				}
+			}
+			if GetAsyncKeyState(0x10) != 0 {
+				let mut exit_code_buffer = [0u32; 1];
+				GetExitCodeProcess(client.proc_handle, exit_code_buffer.as_mut_ptr());
+				println!("{:?}, Exit code: {:?}", client.proc_handle, exit_code_buffer);
+				CloseHandle(client.proc_handle);
+				let mut exit_code_buffer = [0u32; 1];
+				GetExitCodeProcess(client.proc_handle, exit_code_buffer.as_mut_ptr());
+				println!("{:?}, Exit code: {:?}", client.proc_handle, exit_code_buffer);
+				return;
+			}
+		}
+	}
 }
 
 unsafe extern "system" fn wglSwapBuffers_h(hdc: HDC) -> bool  {
-
-	return wglSwapBuffers_o.unwrap()(hdc)
+	return true
+	//return wglSwapBuffers_o.unwrap()(hdc)
 }
 
 

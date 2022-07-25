@@ -1,7 +1,7 @@
 use std::{mem::{size_of, size_of_val}, ffi::c_void, ptr::{self, eq}};
 
 use sysinfo::{System, SystemExt, ProcessExt, Pid, PidExt};
-use windows::{Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::{ReadProcessMemory, WriteProcessMemory}}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION, PROCESS_VM_WRITE, GetCurrentProcess, PROCESS_VM_OPERATION}, Memory::{VirtualQueryEx, MEMORY_BASIC_INFORMATION, VirtualProtect, PAGE_PROTECTION_FLAGS, VirtualProtectEx, VirtualAlloc, VirtualAllocEx, MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE}, ProcessStatus::{K32EnumProcessModulesEx, LIST_MODULES_32BIT, K32GetModuleBaseNameA, LIST_MODULES_ALL}, LibraryLoader::{LoadLibraryA, GetProcAddress}}, Foundation::{HANDLE, CloseHandle, GetLastError, WIN32_ERROR, HINSTANCE, FARPROC}}, core::PSTR};
+use windows::{Win32::{System::{Diagnostics::{ToolHelp::{CreateToolhelp32Snapshot, TH32CS_SNAPMODULE32, TH32CS_SNAPMODULE, MODULEENTRY32, Module32First, PROCESSENTRY32}, Debug::{ReadProcessMemory, WriteProcessMemory}}, Threading::{OpenProcess, PROCESS_VM_READ, PROCESS_QUERY_INFORMATION, PROCESS_VM_WRITE, GetCurrentProcess, PROCESS_VM_OPERATION}, Memory::{VirtualQueryEx, MEMORY_BASIC_INFORMATION, VirtualProtect, PAGE_PROTECTION_FLAGS, VirtualProtectEx, VirtualAlloc, VirtualAllocEx, MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE}, ProcessStatus::{K32EnumProcessModulesEx, LIST_MODULES_32BIT, K32GetModuleBaseNameA, LIST_MODULES_ALL}, LibraryLoader::{LoadLibraryA, GetProcAddress}}, Foundation::{HANDLE, CloseHandle, GetLastError, WIN32_ERROR, HINSTANCE, FARPROC}, Graphics::Gdi::HDC}, core::PSTR};
 
 pub enum AddressType {
     Pointer,
@@ -79,20 +79,33 @@ pub fn get_loaded_module(handle: HANDLE, name: String) -> Result<HINSTANCE, Stri
 
 // Returns relative address of function from module
 
-pub fn get_exported_function_offset(handle: HANDLE, module_name: &str, func_name: &str) -> Result<usize, String> {
+// pub fn get_exported_function_pointer(handle: HANDLE, module_name: &str, func_name: &str) -> Option<fn()> {
+//     unsafe {
+//         match LoadLibraryA(module_name) { // Load it in
+//             Ok(instance) => {
+//                 println!("Calling get_loaded with handle: {:?} and name: {:?} instance is {:X}", handle, module_name.to_string(), instance.0);
+//                 let loaded_addr = get_loaded_module(handle, module_name.to_string())?;
+//                 println!("Base module loaded at {:X}", instance.0);
+//                 let func_relative_addr: usize = std::mem::transmute(GetProcAddress(instance, func_name));
+//                 println!("fun_rec {:X}", func_relative_addr);
+//                 let rel = func_relative_addr - loaded_addr.0 as usize;
+//                 return Ok(rel)
+//                 //return func_relative_addr - get_loaded_module(GetCurrentProcess(), module_name.to_string())
+//             },
+//             Err(e) => Err(e.to_string())
+//         }
+// 	}
+// }
+
+pub fn get_exported_function_address(handle: HANDLE, module_name: &str, func_name: &str) -> Option<usize> {
     unsafe {
-        match LoadLibraryA(module_name) { // Load it in
+        match LoadLibraryA(module_name) { 
             Ok(instance) => {
                 println!("Calling get_loaded with handle: {:?} and name: {:?} instance is {:X}", handle, module_name.to_string(), instance.0);
-                let loaded_addr = get_loaded_module(handle, module_name.to_string())?;
-                println!("Base module loaded at {:X}", instance.0);
-                let func_relative_addr: usize = std::mem::transmute(GetProcAddress(instance, func_name));
-                println!("fun_rec {:X}", func_relative_addr);
-                let rel = func_relative_addr - loaded_addr.0 as usize;
-                return Ok(rel)
-                //return func_relative_addr - get_loaded_module(GetCurrentProcess(), module_name.to_string())
+                let pointer_address: usize = std::mem::transmute(GetProcAddress(instance, func_name));
+                return Some(pointer_address)
             },
-            Err(e) => Err(e.to_string())
+            _ => None
         }
 	}
 }
@@ -227,35 +240,24 @@ pub fn nop_address(handle: HANDLE, addr: usize) -> Result<String, WIN32_ERROR> {
     }
 }
 
-pub fn detour(handle: HANDLE, jmp_from: usize, jmp_to: usize) -> Result<String, WIN32_ERROR> {
+pub fn detour(handle: HANDLE, jmp_from: usize, jmp_to: usize) -> Result<usize, WIN32_ERROR> {
     let relative_jmp = jmp_to - jmp_from - 5;
     write_mem_addr(handle, jmp_from, 0xE9, 1)?;
     write_mem_addr(handle, jmp_from + 1, relative_jmp, 4)?;
-    return Ok(format!("JMP instruction placed at {:X} to {:X}", jmp_from, jmp_to))
+    return Ok(jmp_to)
 }
 
 
-// pub unsafe fn trampoline_hook(handle: HANDLE, target_func: usize, src_func: usize, bytes: i32) -> Result<usize, WIN32_ERROR> {
-//     //Create Gateway
-//     let gateway = VirtualAllocEx(handle, ptr::null(), bytes as usize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE) as usize;
-
-// 	// Write stolen bytes to gateway
-//     write_mem_addr(handle, gateway, target_func, bytes)?;
-
-//     let getway_rel = target_func - gateway - 5;
-
-//     write_mem_addr(handle, jmp_from, 0xE9, 5)?; 
-
-// 	// Get the gateway to destination address
-
-// 	// Add jmp opcode to the end of the gateway
-
-// 	// Write address of gateway to the jmp
-
-// 	// Perform detour
-// }
-
-
+pub fn trampoline_hook(handle: HANDLE, target_func: usize, src_func: usize, bytes: i32) -> Result<usize, WIN32_ERROR> {
+    unsafe {
+        let gateway = VirtualAllocEx(handle, ptr::null(), bytes as usize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE) as usize;
+        write_mem_addr(handle, gateway, target_func, bytes)?;
+        let gateway_rel = (target_func - gateway - 5) as usize;
+        write_mem_addr(handle, gateway + bytes as usize, 0xE9, 1)?; 
+        write_mem_addr(handle, gateway + bytes as usize + 0x1, gateway_rel, 4)?;
+        return detour(handle, target_func, src_func);
+    }
+}
 
 // VirtualProtectEx(handle, addr as *const c_void, 487424, PAGE_PROTECTION_FLAGS(4), &mut old_proc_flags);
 // VirtualProtectEx(handle, addr as *const c_void, 487424, old_proc_flags, &mut old_proc_flags);

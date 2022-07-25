@@ -7,10 +7,6 @@ edition = "2021"
 
 [dependencies]
 sysinfo = "0.24.2"
-egui = "0.18.1"
-eframe = "0.18.0"
-crossterm = "0.23.2"
-num = "0.4.0"
 
 [dependencies.windows]
 version = "0.38.0"
